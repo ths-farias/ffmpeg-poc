@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8">
+  <title>Plyr - Player Customizado com HLS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Plyr CSS -->
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+  <!-- Plyr JS -->
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 20px;
+      background-color: #181818;
+      color: white;
+    }
+
+    h2 {
+      margin-bottom: 20px;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: auto;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 10px;
+      box-shadow: 0px 0px 15px rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>Plyr - Player Customizado com HLS</h2>
+  <div class="container">
+    <video id="player" controls crossorigin playsinline>
+      <!-- Os sources serão gerados dinamicamente -->
+    </video>
+  </div>
+
+  <script>
+    var video = document.getElementById('player');
+    var urlParams = new URLSearchParams(window.location.search);
+    var videoSrc = urlParams.get('video');
+
+    if (videoSrc && Hls.isSupported()) {
+      var hls = new Hls();
+      hls.loadSource(videoSrc);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+        console.log("Manifesto carregado:", data);
+
+        let availableQualities = data.levels
+          .map(level => ({
+            label: level.height > 0 ? `${level.height}p` : "Desconhecida",
+            value: level.height
+          }))
+          .filter(q => q.label !== "Desconhecida") // Remover valores inválidos
+          .sort((a, b) => b.value - a.value); // Organizar do maior para o menor
+
+        availableQualities.unshift({ label: "Auto", value: "auto" }); // Adicionar opção automática
+
+        // Criar player com suporte a qualidade
+        const player = new Plyr(video, {
+          controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'fullscreen'],
+          settings: ['quality'],
+          quality: {
+            default: "auto",
+            options: availableQualities.map(q => q.value),
+            forced: true,
+            onChange: (quality) => {
+              if (quality === "auto") {
+                hls.currentLevel = -1;
+              } else {
+                const selectedQuality = availableQualities.find(q => q.value === quality);
+                hls.levels.forEach((level, index) => {
+                  if (level.height === selectedQuality.value) {
+                    hls.currentLevel = index;
+                  }
+                });
+              }
+            }
+          }
+        });
+
+        console.log("Resoluções disponíveis:", availableQualities);
+      });
+
+    } else {
+      video.src = videoSrc;
+    }
+  </script>
+
+</body>
+
+</html>
