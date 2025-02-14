@@ -130,7 +130,6 @@ async function uploadFile(s3Key, filePath) {
             Key: s3Key,
             Body: fileContent
         };
-        console.log(`Bucket ${process.env.AWS_BUCKET_NAME}`);
         console.log(`📤 Enviando ${s3Key} para o S3...`);
         await s3.send(new PutObjectCommand(params));
 
