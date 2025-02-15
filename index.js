@@ -4,20 +4,20 @@ const path = require('path');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-
-ffmpeg.setFfmpegPath(ffmpegPath);
+const axios = require('axios');
 
 require("dotenv").config();
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const resolutions = [
     { name: "480p", width: 854, height: 480, bitrate: "800k" },
-    { name: "720p", width: 1280, height: 720, bitrate: "2500k" },
-    { name: "1080p", width: 1920, height: 1080, bitrate: "5000k" },
+    // { name: "720p", width: 1280, height: 720, bitrate: "2500k" },
+    // { name: "1080p", width: 1920, height: 1080, bitrate: "5000k" },
 ];
 
-const formatVideoM3u8 = (inputFilePath, res) => {
+const formatVideoM3u8 = (inputFilePath, res, token) => {
     const baseName = path.basename(inputFilePath, path.extname(inputFilePath));
-    const outputDir = '.hls';
+    const outputDir = '.temp';
 
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
@@ -57,22 +57,22 @@ const formatVideoM3u8 = (inputFilePath, res) => {
     });
 
     Promise.all(conversionPromises)
-        .then(() => uploadHLSFiles(baseName, res))
+        .then(() => uploadHLSFiles(baseName, token))
         .catch((err) => {
             console.error('❌ Erro ao converter o vídeo:', err);
             res.status(500).json({ error: 'Erro ao processar o vídeo' });
         });
 };
 
-async function uploadHLSFiles(baseName, res) {
-    const outputDir = '.hls';
+async function uploadHLSFiles(baseName, token) {
+    const outputDir = '.temp';
     let filesToUpload = [];
 
     const masterPlaylistPath = `${outputDir}/${baseName}.m3u8`;
     let masterPlaylist = `#EXTM3U\n`;
 
     resolutions.forEach(resolution => {
-        const s3M3U8Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/hls/${baseName}_${resolution.name}.m3u8`;
+        const s3M3U8Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${token}/${baseName}_${resolution.name}.m3u8`;
         masterPlaylist += `#EXT-X-STREAM-INF:BANDWIDTH=${parseInt(resolution.bitrate) * 1000},RESOLUTION=${resolution.width}x${resolution.height}\n`;
         masterPlaylist += `${s3M3U8Url}\n`;
     });
@@ -83,13 +83,14 @@ async function uploadHLSFiles(baseName, res) {
     console.log(`✅ Master playlist gerada: ${masterPlaylistPath}`);
 
     fs.readdirSync(outputDir).forEach(file => {
-        if (file.startsWith(baseName)) {
-            filesToUpload.push({ local: `${outputDir}/${file}`, s3Key: `hls/${file}` });
+        if (file.startsWith(baseName) && !file.match(/\.(mp4|avi|mov|mkv|webm)$/i)) {
+            filesToUpload.push({ local: `${outputDir}/${file}`, s3Key: `${token}/${file}` });
         }
     });
 
     try {
         const s3Urls = {};
+
         for (const file of filesToUpload) {
             const fileUrl = await uploadFile(file.s3Key, file.local);
             s3Urls[file.local] = fileUrl;
@@ -97,19 +98,15 @@ async function uploadHLSFiles(baseName, res) {
 
         console.log('📤 Todos os arquivos enviados para S3');
 
-        const finalM3U8Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/hls/${baseName}.m3u8`;
-
+        const finalM3U8Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${token}/${baseName}.m3u8`;
         console.log(`🎥 Vídeo final disponível em: ${finalM3U8Url}`);
-        
         cleanupLocalFiles(outputDir, baseName);
+        await sendWebhookNotification(finalM3U8Url, token);
 
-        res.json({ message: 'Vídeo processado e enviado para S3 com sucesso', videoUrl: finalM3U8Url });
     } catch (error) {
         console.error('❌ Erro no upload dos arquivos:', error);
-        res.status(500).json({ error: 'Erro ao enviar arquivos para S3' });
     }
 }
-
 
 async function uploadFile(s3Key, filePath) {
     try {
@@ -155,6 +152,25 @@ function cleanupLocalFiles(outputDir, baseName) {
         console.log('🧹 Limpeza de arquivos locais concluída!');
     } catch (error) {
         console.error('❌ Erro ao remover arquivos locais:', error);
+    }
+}
+
+async function sendWebhookNotification(videoUrl, token) {
+    try {
+        const webhookUrl = process.env.WEBHOOK_URL;
+        const payload = {
+            message: 'Vídeo processado e disponível no S3',
+            status: 'success',
+            videoUrl,
+            token
+        };
+
+        console.log(`📡 Enviando webhook para ${webhookUrl}...`);
+        await axios.post(webhookUrl, payload, { headers: { 'Content-Type': 'application/json' } });
+
+        console.log('✅ Webhook enviado com sucesso!');
+    } catch (error) {
+        console.error('❌ Erro ao enviar webhook:', error);
     }
 }
 

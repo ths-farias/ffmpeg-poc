@@ -6,6 +6,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "aws-sdk": "^2.1692.0",
+    "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "fluent-ffmpeg": "^2.1.3",
